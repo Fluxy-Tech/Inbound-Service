@@ -126,7 +126,8 @@ export async function handleInboundMessage(
   // Bloqueio (Agent-Console > Contatos > cadeado): contato explicitamente
   // impedido de falar com este agente — nem IA, nem atendente. A mensagem já
   // foi salva no Mongo acima (fica no histórico), só não é roteada adiante.
-  if (target.blockedAgentIds.includes(whatsappChannel.agent.id)) {
+  // Só faz sentido quando existe agente vinculado ao canal.
+  if (whatsappChannel.agent && target.blockedAgentIds.includes(whatsappChannel.agent.id)) {
     console.log(
       `[BLOCKED][webhook-service] targetId=${target.id} agentId=${whatsappChannel.agent.id} — contato bloqueado para este agente`,
     );
@@ -141,17 +142,26 @@ export async function handleInboundMessage(
     return;
   }
 
-  if (target.status === "HUMAN") {
-    console.log(`[DESK-MSG][webhook-service] targetId=${target.id} status=HUMAN — roteando para desk.message.inbound`);
+  // target.status === "HUMAN" (ticket já aberto) ou canal sem agente
+  // ativo (openAgent=false, ou sem nenhum agente vinculado — inconsistente,
+  // mas tratado como desligado por segurança) nunca passa pela IA, vai
+  // direto pro Desk-Worker abrir/atualizar o ticket na fila idServiceIslandDefault.
+  if (target.status === "HUMAN" || !whatsappChannel.openAgent || !whatsappChannel.agent) {
+    console.log(
+      `[DESK-MSG][webhook-service] targetId=${target.id} status=${target.status} openAgent=${whatsappChannel.openAgent} — roteando para desk.message.inbound`,
+    );
     await publishJson(channel, QUEUE_DESK_MESSAGE_INBOUND, {
       target: targetPayload,
       whatsappChannel: whatsappChannelPayload,
       messagingSession: messagingSessionPayload,
-      agent: { id: whatsappChannel.agent.id, name: whatsappChannel.agent.name },
+      agent: whatsappChannel.agent ? { id: whatsappChannel.agent.id, name: whatsappChannel.agent.name } : null,
+      defaultQueueId: whatsappChannel.idServiceIslandDefault,
       message: { mongoMessageId, externalMessageId: message.id, type: messageType, text, timestamp: message.timestamp },
     });
     return;
   }
+
+  const agent = whatsappChannel.agent;
 
   // "AI" e "FINISHED" seguem para o pipeline de IA — não existe ainda regra de
   // produto para reengajamento automático de uma conversa "FINISHED" (mesmo
@@ -159,10 +169,10 @@ export async function handleInboundMessage(
   if (message.type !== "text") {
     await markSessionProcessing(messagingSession.id);
     await requestTypingIndicator(channel, whatsappChannel.id, whatsappChannel.phoneNumberId, message.id);
-    await publishJson(channel, resolveAgentQueueName(whatsappChannel.agent.name), {
+    await publishJson(channel, resolveAgentQueueName(agent.name), {
       target: targetPayload,
       whatsappChannel: whatsappChannelPayload,
-      agent: agentPayload(whatsappChannel.agent),
+      agent: agentPayload(agent),
       messagingSession: messagingSessionPayload,
       messages: [{ mongoMessageId, externalMessageId: message.id, type: messageType, text, timestamp: message.timestamp }],
     });
@@ -190,7 +200,7 @@ export async function handleInboundMessage(
       target: targetPayload,
       whatsappChannel: whatsappChannelPayload,
       messagingSession: messagingSessionPayload,
-      answer: { text: whatsappChannel.agent.processingMessage, audio: "", image: "" },
+      answer: { text: agent.processingMessage, audio: "", image: "" },
       finishesProcessing: false,
       origin: "SYSTEM",
     });
@@ -216,22 +226,23 @@ export async function flushDebounceWindow(channel: Channel, messagingSessionId: 
 
   const target = messagingSession.target;
   const whatsappChannel = target.whatsappChannel;
+  const whatsappChannelPayload = {
+    id: whatsappChannel.id,
+    phoneNumberId: whatsappChannel.phoneNumberId,
+    wabaId: whatsappChannel.wabaId,
+    serviceIslandId: whatsappChannel.serviceIsland?.id ?? null,
+  };
 
   // Mesmo bloqueio checado em handleInboundMessage — precisa repetir aqui
   // porque o flush é assíncrono/desacoplado: o estado de bloqueio pode ter
   // mudado entre a mensagem chegar e a janela de debounce fechar.
-  if (target.blockedAgentIds.includes(whatsappChannel.agent.id)) {
+  if (whatsappChannel.agent && target.blockedAgentIds.includes(whatsappChannel.agent.id)) {
     console.log(
       `[BLOCKED][webhook-service] (flush) targetId=${target.id} agentId=${whatsappChannel.agent.id} — contato bloqueado para este agente`,
     );
     await publishJson(channel, QUEUE_OUTBOUND_MESSAGE_SEND, {
       target: { id: target.id, waId: target.waId, name: target.name, metadata: target.metadata },
-      whatsappChannel: {
-        id: whatsappChannel.id,
-        phoneNumberId: whatsappChannel.phoneNumberId,
-        wabaId: whatsappChannel.wabaId,
-        serviceIslandId: whatsappChannel.serviceIsland?.id ?? null,
-      },
+      whatsappChannel: whatsappChannelPayload,
       messagingSession: { id: messagingSession.id, startedAt: messagingSession.startedAt },
       answer: { text: whatsappChannel.agent.blockedMessage, audio: "", image: "" },
       finishesProcessing: true,
@@ -240,17 +251,34 @@ export async function flushDebounceWindow(channel: Channel, messagingSessionId: 
     return;
   }
 
+  // Mesma checagem de handleInboundMessage: canal pode ter sido desativado
+  // (openAgent virou false, ou o agente foi desvinculado) entre a mensagem
+  // chegar e a janela de debounce fechar — nesse caso o lote inteiro vai pro
+  // Desk-Worker em vez do agente, usando a última mensagem como gatilho.
+  if (target.status === "HUMAN" || !whatsappChannel.openAgent || !whatsappChannel.agent) {
+    const last = messages[messages.length - 1];
+    console.log(
+      `[DESK-MSG][webhook-service] (flush) targetId=${target.id} status=${target.status} openAgent=${whatsappChannel.openAgent} — roteando para desk.message.inbound`,
+    );
+    await publishJson(channel, QUEUE_DESK_MESSAGE_INBOUND, {
+      target: { id: target.id, waId: target.waId, name: target.name, metadata: target.metadata },
+      whatsappChannel: whatsappChannelPayload,
+      messagingSession: { id: messagingSession.id, startedAt: messagingSession.startedAt },
+      agent: whatsappChannel.agent ? { id: whatsappChannel.agent.id, name: whatsappChannel.agent.name } : null,
+      defaultQueueId: whatsappChannel.idServiceIslandDefault,
+      message: { mongoMessageId: last.mongoMessageId, externalMessageId: last.externalMessageId, type: last.type, text: last.text, timestamp: last.timestamp },
+    });
+    return;
+  }
+
+  const agent = whatsappChannel.agent;
+
   await markSessionProcessing(messagingSessionId);
   await requestTypingIndicator(channel, whatsappChannel.id, whatsappChannel.phoneNumberId, messages[messages.length - 1].externalMessageId);
-  await publishJson(channel, resolveAgentQueueName(whatsappChannel.agent.name), {
+  await publishJson(channel, resolveAgentQueueName(agent.name), {
     target: { id: target.id, waId: target.waId, name: target.name, metadata: target.metadata },
-    whatsappChannel: {
-      id: whatsappChannel.id,
-      phoneNumberId: whatsappChannel.phoneNumberId,
-      wabaId: whatsappChannel.wabaId,
-      serviceIslandId: whatsappChannel.serviceIsland?.id ?? null,
-    },
-    agent: agentPayload(whatsappChannel.agent),
+    whatsappChannel: whatsappChannelPayload,
+    agent: agentPayload(agent),
     messagingSession: { id: messagingSession.id, startedAt: messagingSession.startedAt },
     messages,
   });

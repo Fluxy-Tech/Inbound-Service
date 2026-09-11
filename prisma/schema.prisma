@@ -75,8 +75,14 @@ model WhatsappChannel {
   id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  agentId        String
-  agent          Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  agentId        String?
+  agent          Agent?       @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  /// Decide se handleInboundMessage manda pro agente (true) ou direto pro
+  /// atendimento humano via idServiceIslandDefault (false) — ver webhook-service.ts.
+  openAgent Boolean @default(false)
+  /// Id de uma Queue (fila) — usado quando openAgent=false.
+  idServiceIslandDefault String?
 
   phoneNumberId   String  @unique
   displayNumber   String
