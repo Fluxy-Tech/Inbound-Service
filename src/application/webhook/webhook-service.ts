@@ -8,8 +8,10 @@ import {
   QUEUE_OUTBOUND_MESSAGE_SEND,
   resolveAgentQueueName,
 } from "../../infrastructure/queue/rabbitmq/publisher";
+import { handleCampaignResponse } from "./campaign-response-service";
 import { isMessageAlreadyProcessed, markMessageProcessed } from "./dedup-service";
 import { popDebounceWindow, pushToDebounceWindow } from "./debounce-service";
+import { recordMessageLog } from "./message-log-service";
 import { mapMetaMessageType } from "./message-type-mapper";
 import { resolveOrCreateMessagingSession } from "./messaging-session-service";
 import { saveInboundMessage } from "./mongo-message-service";
@@ -86,6 +88,10 @@ export async function handleInboundMessage(
     return;
   }
 
+  // externalMessageId (wamid) é o único id que já existe neste ponto — o
+  // mongoMessageId só nasce depois de saveInboundMessage, mais abaixo.
+  await recordMessageLog(message.id, "start");
+
   const target = await resolveOrCreateTarget({
     organizationId: whatsappChannel.organizationId,
     whatsappChannelId: whatsappChannel.id,
@@ -96,6 +102,19 @@ export async function handleInboundMessage(
 
   const messageType = mapMetaMessageType(message.type);
   const text = message.type === "text" ? (message.text?.body ?? "") : "";
+
+  // Assíncrono de propósito (sem await) — vincula a resposta a uma campanha
+  // pendente e avalia bloqueio por frase, sem atrasar o roteamento da
+  // mensagem. Ver campaign-response-service.ts.
+  handleCampaignResponse(
+    target.id,
+    {
+      id: whatsappChannel.id,
+      useWordsToBlockCampaign: whatsappChannel.useWordsToBlockCampaign,
+      wordsToBlockCampaign: whatsappChannel.wordsToBlockCampaign,
+    },
+    text,
+  );
 
   // Resolve a sessão ANTES de gravar no Mongo — o documento precisa do
   // messagingSessionId final desde a criação, sem update pontual depois.
@@ -141,6 +160,7 @@ export async function handleInboundMessage(
       finishesProcessing: true,
       origin: "SYSTEM",
     });
+    await recordMessageLog(mongoMessageId, "end");
     return;
   }
 
@@ -160,6 +180,7 @@ export async function handleInboundMessage(
       defaultQueueId: whatsappChannel.idServiceIslandDefault,
       message: { mongoMessageId, externalMessageId: message.id, type: messageType, text, timestamp: message.timestamp },
     });
+    await recordMessageLog(mongoMessageId, "end");
     return;
   }
 
@@ -178,6 +199,7 @@ export async function handleInboundMessage(
       messagingSession: messagingSessionPayload,
       messages: [{ mongoMessageId, externalMessageId: message.id, type: messageType, text, timestamp: message.timestamp }],
     });
+    await recordMessageLog(mongoMessageId, "end");
     return;
   }
 
@@ -252,6 +274,7 @@ export async function flushDebounceWindow(channel: Channel, messagingSessionId: 
       finishesProcessing: true,
       origin: "SYSTEM",
     });
+    await Promise.all(messages.map((m) => recordMessageLog(m.mongoMessageId, "end")));
     return;
   }
 
@@ -272,6 +295,7 @@ export async function flushDebounceWindow(channel: Channel, messagingSessionId: 
       defaultQueueId: whatsappChannel.idServiceIslandDefault,
       message: { mongoMessageId: last.mongoMessageId, externalMessageId: last.externalMessageId, type: last.type, text: last.text, timestamp: last.timestamp },
     });
+    await Promise.all(messages.map((m) => recordMessageLog(m.mongoMessageId, "end")));
     return;
   }
 
@@ -286,4 +310,5 @@ export async function flushDebounceWindow(channel: Channel, messagingSessionId: 
     messagingSession: { id: messagingSession.id, startedAt: messagingSession.startedAt },
     messages,
   });
+  await Promise.all(messages.map((m) => recordMessageLog(m.mongoMessageId, "end")));
 }

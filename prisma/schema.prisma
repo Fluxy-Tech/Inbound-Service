@@ -80,7 +80,7 @@ model Channel {
 
   /// Decide se handleInboundMessage manda pro agente (true) ou direto pro
   /// atendimento humano via idServiceIslandDefault (false) — ver webhook-service.ts.
-  openAgent Boolean @default(false)
+  openAgent              Boolean @default(false)
   /// Id de uma Queue (fila) — usado quando openAgent=false.
   idServiceIslandDefault String?
 
@@ -96,24 +96,32 @@ model Channel {
   /// a mensagem padrão fixa no Piloto (consumer.py).
   resetMessage String?
 
+  /// Frases que bloqueiam o contato de futuras campanhas deste canal quando
+  /// ele responde com uma delas a um disparo — ver Agent-Api/prisma/schema.prisma
+  /// (dono canônico) e application/webhook/campaign-response-service.ts.
+  wordsToBlockCampaign    String[] @default([])
+  /// Liga/desliga a avaliação de wordsToBlockCampaign para este canal.
+  useWordsToBlockCampaign Boolean  @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  serviceIsland ServiceIsland?
-  targets       Target[]
+  serviceIsland        ServiceIsland?
+  targets              Target[]
+  targetBlockCampaigns TargetBlockCampaign[]
 
   @@index([organizationId])
   @@index([agentId])
 }
 
 model ServiceIsland {
-  id                  String          @id @default(cuid())
+  id                  String       @id @default(cuid())
   organizationId      String
-  organization        Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  whatsappChannelId   String          @unique
-  whatsappChannel     Channel @relation(fields: [whatsappChannelId], references: [id], onDelete: Cascade)
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  whatsappChannelId   String       @unique
+  whatsappChannel     Channel      @relation(fields: [whatsappChannelId], references: [id], onDelete: Cascade)
   name                String
-  allowActiveDispatch Boolean         @default(false)
+  allowActiveDispatch Boolean      @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -171,16 +179,16 @@ enum TargetStatus {
 }
 
 model Target {
-  id                String          @id @default(cuid())
+  id                String       @id @default(cuid())
   organizationId    String
-  organization      Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   whatsappChannelId String
-  whatsappChannel   Channel @relation(fields: [whatsappChannelId], references: [id], onDelete: Cascade)
+  whatsappChannel   Channel      @relation(fields: [whatsappChannelId], references: [id], onDelete: Cascade)
 
   /// Business-Scoped User ID (contacts[].user_id) — vínculo principal do
   /// contato, sempre presente desde abr/2026. Nullable só pra Target
   /// criado manualmente antes de o contato mandar mensagem de verdade.
-  bsuid String?
+  bsuid    String?
   /// wa_id da Meta — agora opcional (omitido quando o contato ativa
   /// @username e não há troca recente de telefone).
   waId     String?
@@ -199,11 +207,59 @@ model Target {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  messagingSessions MessagingSession[]
+  messagingSessions    MessagingSession[]
+  campaignTargets      CampaignTarget[]
+  targetBlockCampaigns TargetBlockCampaign[]
 
   @@unique([organizationId, whatsappChannelId, bsuid])
   @@unique([organizationId, whatsappChannelId, waId])
   @@index([organizationId])
+  @@index([whatsappChannelId])
+}
+
+/// Subconjunto mínimo — só o suficiente pra CampaignTarget compilar. Ver
+/// Agent-Api/prisma/schema.prisma (schema canônico) pro modelo completo.
+model Campaign {
+  id String @id @default(cuid())
+
+  targets CampaignTarget[]
+}
+
+/// Uma linha por contato disparado dentro de uma campanha. Usado aqui só
+/// pra vincular a resposta do cliente ao disparo (ver
+/// application/webhook/campaign-response-service.ts) — demais colunas ficam
+/// de fora por não serem lidas/escritas neste serviço.
+model CampaignTarget {
+  id         String   @id @default(cuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  targetId   String
+  target     Target   @relation(fields: [targetId], references: [id], onDelete: Cascade)
+
+  respondedCampaign Boolean @default(false)
+  campaignResponse  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([campaignId])
+  @@index([targetId, respondedCampaign])
+}
+
+/// Bloqueio automático de um contato para campanhas de um canal específico —
+/// ver Agent-Api/prisma/schema.prisma (schema canônico) pro comentário
+/// completo. Este serviço só cria linhas aqui (nunca lê).
+model TargetBlockCampaign {
+  id                String  @id @default(cuid())
+  targetId          String
+  target            Target  @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  whatsappChannelId String
+  whatsappChannel   Channel @relation(fields: [whatsappChannelId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([targetId, whatsappChannelId])
   @@index([whatsappChannelId])
 }
 
@@ -236,4 +292,19 @@ model ProcessedInboundMessage {
   processedAt       DateTime @default(now())
 
   @@index([whatsappChannelId])
+}
+
+/// Rastreamento de uma mensagem passando pelos serviços da mensageria — ver
+/// Agent-Api/prisma/schema.prisma (schema canônico) pro comentário completo
+/// e MENSAGERIA.md pro mapa das filas. Sem FK: messageId é um ponteiro solto
+/// (Mongo _id da mensagem, ou o id disponível naquele estágio).
+model MessageLog {
+  id         String   @id @default(cuid())
+  messageId  String
+  createdAt  DateTime @default(now())
+  messageLog String
+  stagio     String
+
+  @@index([messageId])
+  @@index([messageLog, stagio])
 }
