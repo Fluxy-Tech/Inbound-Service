@@ -23,7 +23,7 @@ model Organization {
   tokenAcessApi String?  @unique
 
   agents           Agent[]
-  whatsappChannels WhatsappChannel[]
+  whatsappChannels Channel[]
   serviceIslands   ServiceIsland[]
   targets          Target[]
 
@@ -65,13 +65,13 @@ model Agent {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  whatsappChannels WhatsappChannel[]
+  whatsappChannels Channel[]
 
   @@index([organizationId])
   @@index([defaultQueueId])
 }
 
-model WhatsappChannel {
+model Channel {
   id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -89,6 +89,13 @@ model WhatsappChannel {
   wabaId          String  @unique
   metaAccessToken String?
 
+  /// Palavras/frases-chave de reset de jornada — ver Agent-Api/prisma/schema.prisma
+  /// (dono canônico da migration) e AI-Worker/Piloto/consumer.py (quem consome).
+  wordsToReset String[] @default([])
+  /// Mensagem enviada ao contato depois do reset de jornada. null/vazio = usa
+  /// a mensagem padrão fixa no Piloto (consumer.py).
+  resetMessage String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -104,7 +111,7 @@ model ServiceIsland {
   organizationId      String
   organization        Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   whatsappChannelId   String          @unique
-  whatsappChannel     WhatsappChannel @relation(fields: [whatsappChannelId], references: [id], onDelete: Cascade)
+  whatsappChannel     Channel @relation(fields: [whatsappChannelId], references: [id], onDelete: Cascade)
   name                String
   allowActiveDispatch Boolean         @default(false)
 
@@ -168,7 +175,7 @@ model Target {
   organizationId    String
   organization      Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   whatsappChannelId String
-  whatsappChannel   WhatsappChannel @relation(fields: [whatsappChannelId], references: [id], onDelete: Cascade)
+  whatsappChannel   Channel @relation(fields: [whatsappChannelId], references: [id], onDelete: Cascade)
 
   /// Business-Scoped User ID (contacts[].user_id) — vínculo principal do
   /// contato, sempre presente desde abr/2026. Nullable só pra Target

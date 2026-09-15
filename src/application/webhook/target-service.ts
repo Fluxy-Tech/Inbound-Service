@@ -1,8 +1,8 @@
 import { normalizeBrazilianWaId } from "../../domain/utils/phone";
 import { prisma } from "../../infrastructure/database/prisma/client";
 
-export async function resolveWhatsappChannel(phoneNumberId: string) {
-  return prisma.whatsappChannel.findUnique({
+export async function resolveChannel(phoneNumberId: string) {
+  return prisma.channel.findUnique({
     where: { phoneNumberId },
     include: { agent: true, serviceIsland: true },
   });

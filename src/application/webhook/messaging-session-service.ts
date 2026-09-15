@@ -5,7 +5,7 @@ const WINDOW_MS = 24 * 60 * 60 * 1000;
 /// A expiração da janela de 24h é sempre CALCULADA a partir de
 /// lastCustomerMessageAt — nunca armazenada como flag. Uma sessão expirada (ou
 /// inexistente) nunca é mutada: uma nova linha é criada, preservando a antiga
-/// para histórico/auditoria (mesmo Target+WhatsappChannel).
+/// para histórico/auditoria (mesmo Target+Channel).
 export async function resolveOrCreateMessagingSession(input: { targetId: string; whatsappChannelId: string }) {
   const latest = await prisma.messagingSession.findFirst({
     where: { targetId: input.targetId },

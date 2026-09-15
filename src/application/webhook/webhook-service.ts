@@ -14,7 +14,7 @@ import { mapMetaMessageType } from "./message-type-mapper";
 import { resolveOrCreateMessagingSession } from "./messaging-session-service";
 import { saveInboundMessage } from "./mongo-message-service";
 import { isSessionProcessing, markSessionProcessing } from "./processing-state-service";
-import { resolveOrCreateTarget, resolveWhatsappChannel } from "./target-service";
+import { resolveOrCreateTarget, resolveChannel } from "./target-service";
 import { requestTypingIndicator } from "./typing-indicator-service";
 
 function agentPayload(agent: {
@@ -72,7 +72,7 @@ export async function handleInboundMessage(
     return;
   }
 
-  const whatsappChannel = await resolveWhatsappChannel(phoneNumberId);
+  const whatsappChannel = await resolveChannel(phoneNumberId);
   if (!whatsappChannel) {
     console.warn(`Mensagem recebida para phoneNumberId não cadastrado: ${phoneNumberId}`);
     return;
@@ -120,6 +120,8 @@ export async function handleInboundMessage(
     phoneNumberId: whatsappChannel.phoneNumberId,
     wabaId: whatsappChannel.wabaId,
     serviceIslandId: whatsappChannel.serviceIsland?.id ?? null,
+    wordsToReset: whatsappChannel.wordsToReset,
+    resetMessage: whatsappChannel.resetMessage,
   };
   const messagingSessionPayload = { id: messagingSession.id, startedAt: messagingSession.startedAt };
 
@@ -133,7 +135,7 @@ export async function handleInboundMessage(
     );
     await publishJson(channel, QUEUE_OUTBOUND_MESSAGE_SEND, {
       target: targetPayload,
-      whatsappChannel: whatsappChannelPayload,
+      channel: whatsappChannelPayload,
       messagingSession: messagingSessionPayload,
       answer: { text: whatsappChannel.agent.blockedMessage, audio: "", image: "" },
       finishesProcessing: true,
@@ -152,7 +154,7 @@ export async function handleInboundMessage(
     );
     await publishJson(channel, QUEUE_DESK_MESSAGE_INBOUND, {
       target: targetPayload,
-      whatsappChannel: whatsappChannelPayload,
+      channel: whatsappChannelPayload,
       messagingSession: messagingSessionPayload,
       agent: whatsappChannel.agent ? { id: whatsappChannel.agent.id, name: whatsappChannel.agent.name } : null,
       defaultQueueId: whatsappChannel.idServiceIslandDefault,
@@ -171,7 +173,7 @@ export async function handleInboundMessage(
     await requestTypingIndicator(channel, whatsappChannel.id, whatsappChannel.phoneNumberId, message.id);
     await publishJson(channel, resolveAgentQueueName(agent.name), {
       target: targetPayload,
-      whatsappChannel: whatsappChannelPayload,
+      channel: whatsappChannelPayload,
       agent: agentPayload(agent),
       messagingSession: messagingSessionPayload,
       messages: [{ mongoMessageId, externalMessageId: message.id, type: messageType, text, timestamp: message.timestamp }],
@@ -198,7 +200,7 @@ export async function handleInboundMessage(
     );
     await publishJson(channel, QUEUE_OUTBOUND_MESSAGE_SEND, {
       target: targetPayload,
-      whatsappChannel: whatsappChannelPayload,
+      channel: whatsappChannelPayload,
       messagingSession: messagingSessionPayload,
       answer: { text: agent.processingMessage, audio: "", image: "" },
       finishesProcessing: false,
@@ -231,6 +233,8 @@ export async function flushDebounceWindow(channel: Channel, messagingSessionId: 
     phoneNumberId: whatsappChannel.phoneNumberId,
     wabaId: whatsappChannel.wabaId,
     serviceIslandId: whatsappChannel.serviceIsland?.id ?? null,
+    wordsToReset: whatsappChannel.wordsToReset,
+    resetMessage: whatsappChannel.resetMessage,
   };
 
   // Mesmo bloqueio checado em handleInboundMessage — precisa repetir aqui
@@ -242,7 +246,7 @@ export async function flushDebounceWindow(channel: Channel, messagingSessionId: 
     );
     await publishJson(channel, QUEUE_OUTBOUND_MESSAGE_SEND, {
       target: { id: target.id, waId: target.waId, name: target.name, metadata: target.metadata },
-      whatsappChannel: whatsappChannelPayload,
+      channel: whatsappChannelPayload,
       messagingSession: { id: messagingSession.id, startedAt: messagingSession.startedAt },
       answer: { text: whatsappChannel.agent.blockedMessage, audio: "", image: "" },
       finishesProcessing: true,
@@ -262,7 +266,7 @@ export async function flushDebounceWindow(channel: Channel, messagingSessionId: 
     );
     await publishJson(channel, QUEUE_DESK_MESSAGE_INBOUND, {
       target: { id: target.id, waId: target.waId, name: target.name, metadata: target.metadata },
-      whatsappChannel: whatsappChannelPayload,
+      channel: whatsappChannelPayload,
       messagingSession: { id: messagingSession.id, startedAt: messagingSession.startedAt },
       agent: whatsappChannel.agent ? { id: whatsappChannel.agent.id, name: whatsappChannel.agent.name } : null,
       defaultQueueId: whatsappChannel.idServiceIslandDefault,
@@ -277,7 +281,7 @@ export async function flushDebounceWindow(channel: Channel, messagingSessionId: 
   await requestTypingIndicator(channel, whatsappChannel.id, whatsappChannel.phoneNumberId, messages[messages.length - 1].externalMessageId);
   await publishJson(channel, resolveAgentQueueName(agent.name), {
     target: { id: target.id, waId: target.waId, name: target.name, metadata: target.metadata },
-    whatsappChannel: whatsappChannelPayload,
+    channel: whatsappChannelPayload,
     agent: agentPayload(agent),
     messagingSession: { id: messagingSession.id, startedAt: messagingSession.startedAt },
     messages,
