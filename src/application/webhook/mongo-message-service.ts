@@ -10,6 +10,7 @@ export async function saveInboundMessage(input: {
   messageType: MessageType;
   externalMessageId: string;
   text?: string;
+  mediaUrl?: string;
 }): Promise<string> {
   const db = await getMongoDb();
 
@@ -23,6 +24,7 @@ export async function saveInboundMessage(input: {
     messageType: input.messageType,
     externalMessageId: input.externalMessageId,
     text: input.text,
+    mediaUrl: input.mediaUrl,
     createdAt: new Date(),
   };
 

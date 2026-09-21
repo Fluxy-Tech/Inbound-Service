@@ -26,6 +26,15 @@ const envSchema = z.object({
 
   META_VERIFY_TOKEN: z.string().min(1),
 
+  /// Mídia recebida do cliente (imagem/áudio/vídeo) é baixada da Meta e
+  /// guardada aqui — ver application/webhook/media-service.ts.
+  SEAWEEDFS_S3_ENDPOINT: z.string().min(1),
+  SEAWEEDFS_S3_ACCESS_KEY: z.string().min(1),
+  SEAWEEDFS_S3_SECRET_KEY: z.string().min(1),
+  SEAWEEDFS_S3_BUCKET: z.string().min(1),
+  SEAWEEDFS_S3_REGION: z.string().default("us-east-1"),
+  SEAWEEDFS_S3_PREFIX: z.string().default("fluxy-saas/inbound-service"),
+
   APP_TIMEZONE: z.string().default("America/Sao_Paulo"),
 });
 

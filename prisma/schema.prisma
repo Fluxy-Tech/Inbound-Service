@@ -210,11 +210,39 @@ model Target {
   messagingSessions    MessagingSession[]
   campaignTargets      CampaignTarget[]
   targetBlockCampaigns TargetBlockCampaign[]
+  cardCrm              CardCrm?
 
   @@unique([organizationId, whatsappChannelId, bsuid])
   @@unique([organizationId, whatsappChannelId, waId])
   @@index([organizationId])
   @@index([whatsappChannelId])
+}
+
+/// Subconjunto mínimo — só o suficiente pra crm-card-service.ts compilar. Ver
+/// Agent-Api/prisma/schema.prisma (schema canônico) pro modelo completo.
+model CrmToBusiness {
+  id             String @id
+  organizationId String @unique
+
+  stagesCrm StagesCrm[]
+}
+
+model StagesCrm {
+  id              String        @id
+  crmToBusinessId String
+  crmToBusiness   CrmToBusiness @relation(fields: [crmToBusinessId], references: [id])
+  isDefault       Boolean
+
+  cards CardCrm[]
+}
+
+model CardCrm {
+  id              String        @id @default(cuid())
+  targetId        String        @unique
+  target          Target        @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  crmToBusinessId String
+  stagesCrmId     String?
+  stagesCrm       StagesCrm?    @relation(fields: [stagesCrmId], references: [id], onDelete: SetNull)
 }
 
 /// Subconjunto mínimo — só o suficiente pra CampaignTarget compilar. Ver

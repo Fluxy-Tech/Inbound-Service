@@ -11,7 +11,7 @@ export interface MessageDocument {
   messagingSessionId: string;
   direction: "INBOUND" | "OUTBOUND";
   senderType: "CUSTOMER" | "AGENT_AI" | "ATTENDANT" | "SYSTEM";
-  messageType: "TEXT" | "AUDIO" | "IMAGE" | "DOCUMENT" | "STICKER";
+  messageType: "TEXT" | "AUDIO" | "IMAGE" | "DOCUMENT" | "STICKER" | "VIDEO";
   externalMessageId?: string;
   text?: string;
   mediaUrl?: string;

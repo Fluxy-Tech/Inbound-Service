@@ -8,6 +8,7 @@ import {
   QUEUE_OUTBOUND_MESSAGE_SEND,
   resolveAgentQueueName,
 } from "../../infrastructure/queue/rabbitmq/publisher";
+import { extractMediaText, hasDownloadableMedia, storeInboundMedia } from "./media-service";
 import { handleCampaignResponse } from "./campaign-response-service";
 import { isMessageAlreadyProcessed, markMessageProcessed } from "./dedup-service";
 import { popDebounceWindow, pushToDebounceWindow } from "./debounce-service";
@@ -101,7 +102,9 @@ export async function handleInboundMessage(
   });
 
   const messageType = mapMetaMessageType(message.type);
-  const text = message.type === "text" ? (message.text?.body ?? "") : "";
+  // Imagem/vídeo trazem a legenda como texto da mensagem, documento o nome do
+  // arquivo; áudio e figurinha não têm texto.
+  const text = message.type === "text" ? (message.text?.body ?? "") : extractMediaText(message);
 
   // Assíncrono de propósito (sem await) — vincula a resposta a uma campanha
   // pendente e avalia bloqueio por frase, sem atrasar o roteamento da
@@ -123,6 +126,18 @@ export async function handleInboundMessage(
     whatsappChannelId: whatsappChannel.id,
   });
 
+  // Imagem/áudio/vídeo/documento/figurinha: baixa da Meta e guarda no S3 antes de gravar o
+  // documento, pra ele já nascer com o mediaUrl (portal e Desk só leem daqui).
+  // Falha no download não derruba a mensagem — segue sem mediaUrl.
+  const mediaUrl = hasDownloadableMedia(message)
+    ? await storeInboundMedia({
+        message,
+        accessToken: whatsappChannel.metaAccessToken,
+        organizationId: whatsappChannel.organizationId,
+        targetId: target.id,
+      })
+    : undefined;
+
   const mongoMessageId = await saveInboundMessage({
     organizationId: whatsappChannel.organizationId,
     targetId: target.id,
@@ -131,6 +146,7 @@ export async function handleInboundMessage(
     messageType,
     externalMessageId: message.id,
     text,
+    mediaUrl,
   });
 
   const targetPayload = { id: target.id, waId: target.waId, name: target.name, metadata: target.metadata };

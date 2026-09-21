@@ -46,6 +46,20 @@ export type MetaMessageType =
   | "button"
   | "contacts";
 
+/// Objeto de mídia dentro de messages[] — a Meta manda só o id (o arquivo em si
+/// precisa ser baixado com o token do canal, ver media-service.ts).
+export interface MetaMedia {
+  id: string;
+  mime_type?: string;
+  sha256?: string;
+  /// image/video/document
+  caption?: string;
+  /// document
+  filename?: string;
+  /// audio: true quando é mensagem de voz gravada no app
+  voice?: boolean;
+}
+
 export interface MetaMessage {
   /// Telefone do remetente — opcional pelo mesmo motivo de MetaContact.wa_id.
   from?: string;
@@ -56,6 +70,11 @@ export interface MetaMessage {
   timestamp: string;
   type: MetaMessageType;
   text?: { body?: string };
+  image?: MetaMedia;
+  audio?: MetaMedia;
+  video?: MetaMedia;
+  document?: MetaMedia;
+  sticker?: MetaMedia;
 }
 
 export interface MetaStatus {

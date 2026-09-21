@@ -1,5 +1,6 @@
 import { normalizeBrazilianWaId } from "../../domain/utils/phone";
 import { prisma } from "../../infrastructure/database/prisma/client";
+import { createCardCrmForTarget } from "./crm-card-service";
 
 export async function resolveChannel(phoneNumberId: string) {
   return prisma.channel.findUnique({
@@ -55,7 +56,7 @@ export async function resolveOrCreateTarget(input: {
     });
   }
 
-  return prisma.target.create({
+  const created = await prisma.target.create({
     data: {
       organizationId: input.organizationId,
       whatsappChannelId: input.whatsappChannelId,
@@ -65,4 +66,11 @@ export async function resolveOrCreateTarget(input: {
       lastInteractionAt: new Date(),
     },
   });
+
+  // Producer assíncrono — não atrasa o processamento da mensagem (ver
+  // crm-card-service.ts). Só dispara aqui, nunca no branch de update acima,
+  // porque só um Target novo precisa ganhar card.
+  createCardCrmForTarget(created.id, created.organizationId);
+
+  return created;
 }
