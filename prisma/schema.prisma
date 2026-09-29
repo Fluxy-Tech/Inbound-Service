@@ -67,9 +67,33 @@ model Agent {
 
   whatsappChannels Channel[]
   metadataFields   AgentMetadataField[]
+  functions        AgentFunction[]
 
   @@index([organizationId])
   @@index([defaultQueueId])
+}
+
+/// Espelho de Agent-Api/prisma/schema.prisma (dono canônico da migration) —
+/// vai no payload do AI-Worker (agentPayload.functions).
+enum AgentFunctionType {
+  CALENDAR_EVENT
+  KANBAN_CARD
+}
+
+model AgentFunction {
+  id      String            @id @default(cuid())
+  agentId String
+  agent   Agent             @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  type    AgentFunctionType
+
+  runAtStart       Boolean @default(false)
+  runAfterMetadata Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([agentId, type])
+  @@index([agentId])
 }
 
 /// Espelho de Agent-Api/prisma/schema.prisma (dono canônico da migration) —

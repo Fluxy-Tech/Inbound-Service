@@ -10,6 +10,7 @@ export const AGENT_WITH_METADATA_FIELDS = {
       select: { name: true, nameToAgent: true, rule: true },
       orderBy: { createdAt: "asc" },
     },
+    functions: { select: { type: true, runAtStart: true, runAfterMetadata: true } },
   },
 } as const;
 

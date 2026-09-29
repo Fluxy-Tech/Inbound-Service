@@ -38,6 +38,7 @@ function agentPayload(agent: {
   openaiTokenEncrypted: string | null;
   geminiTokenEncrypted: string | null;
   metadataFields: { name: string; nameToAgent: string; rule: string }[];
+  functions: { type: string; runAtStart: boolean; runAfterMetadata: boolean }[];
 }) {
   return {
     id: agent.id,
@@ -58,6 +59,13 @@ function agentPayload(agent: {
     ragEnabled: agent.ragEnabled,
     // Só os ativos (ver AGENT_WITH_METADATA_FIELDS) — hoje só o piloto coleta.
     metadataFields: agent.metadataFields.map((f) => ({ name: f.name, nameToAgent: f.nameToAgent, rule: f.rule })),
+    // Funções fixas ligadas no Console (CALENDAR_EVENT/KANBAN_CARD) e em que
+    // momento rodam — sem linha no banco = desligada, então nem aparece aqui.
+    functions: agent.functions.map((f) => ({
+      type: f.type,
+      runAtStart: f.runAtStart,
+      runAfterMetadata: f.runAfterMetadata,
+    })),
     // Decifrados aqui mesmo, na borda de publicação — o AI-Worker usa esses
     // valores direto (nunca mais do próprio env do processo). Token ausente
     // ou cifrado com chave divergente vira null (tryDecryptToken loga e não
