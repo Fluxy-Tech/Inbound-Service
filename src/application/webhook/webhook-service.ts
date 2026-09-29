@@ -17,7 +17,7 @@ import { mapMetaMessageType } from "./message-type-mapper";
 import { resolveOrCreateMessagingSession } from "./messaging-session-service";
 import { saveInboundMessage } from "./mongo-message-service";
 import { isSessionProcessing, markSessionProcessing } from "./processing-state-service";
-import { resolveOrCreateTarget, resolveChannel } from "./target-service";
+import { AGENT_WITH_METADATA_FIELDS, resolveOrCreateTarget, resolveChannel } from "./target-service";
 import { requestTypingIndicator } from "./typing-indicator-service";
 
 function agentPayload(agent: {
@@ -37,6 +37,7 @@ function agentPayload(agent: {
   ragEnabled: boolean;
   openaiTokenEncrypted: string | null;
   geminiTokenEncrypted: string | null;
+  metadataFields: { name: string; nameToAgent: string; rule: string }[];
 }) {
   return {
     id: agent.id,
@@ -55,6 +56,8 @@ function agentPayload(agent: {
     // personalidade/RAG fixos em código.
     personality: agent.personality,
     ragEnabled: agent.ragEnabled,
+    // Só os ativos (ver AGENT_WITH_METADATA_FIELDS) — hoje só o piloto coleta.
+    metadataFields: agent.metadataFields.map((f) => ({ name: f.name, nameToAgent: f.nameToAgent, rule: f.rule })),
     // Decifrados aqui mesmo, na borda de publicação — o AI-Worker usa esses
     // valores direto (nunca mais do próprio env do processo). Token ausente
     // ou cifrado com chave divergente vira null (tryDecryptToken loga e não
@@ -256,7 +259,9 @@ export async function flushDebounceWindow(channel: Channel, messagingSessionId: 
 
   const messagingSession = await prisma.messagingSession.findUnique({
     where: { id: messagingSessionId },
-    include: { target: { include: { whatsappChannel: { include: { agent: true, serviceIsland: true } } } } },
+    include: {
+      target: { include: { whatsappChannel: { include: { agent: AGENT_WITH_METADATA_FIELDS, serviceIsland: true } } } },
+    },
   });
 
   if (!messagingSession) {

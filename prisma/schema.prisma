@@ -66,9 +66,29 @@ model Agent {
   updatedAt DateTime @updatedAt
 
   whatsappChannels Channel[]
+  metadataFields   AgentMetadataField[]
 
   @@index([organizationId])
   @@index([defaultQueueId])
+}
+
+/// Espelho de Agent-Api/prisma/schema.prisma (dono canônico da migration) —
+/// os ativos vão no payload do AI-Worker (agentPayload.metadataFields).
+model AgentMetadataField {
+  id      String @id @default(cuid())
+  agentId String
+  agent   Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  name        String
+  nameToAgent String
+  rule        String
+  active      Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([agentId, nameToAgent])
+  @@index([agentId])
 }
 
 model Channel {

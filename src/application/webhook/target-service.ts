@@ -1,10 +1,22 @@
 import { normalizeBrazilianWaId } from "../../domain/utils/phone";
 import { prisma } from "../../infrastructure/database/prisma/client";
 
+/// Agente do canal já com os metadados ativos que ele deve coletar — vão no
+/// payload do AI-Worker (ver webhook-service.ts#agentPayload).
+export const AGENT_WITH_METADATA_FIELDS = {
+  include: {
+    metadataFields: {
+      where: { active: true },
+      select: { name: true, nameToAgent: true, rule: true },
+      orderBy: { createdAt: "asc" },
+    },
+  },
+} as const;
+
 export async function resolveChannel(phoneNumberId: string) {
   return prisma.channel.findUnique({
     where: { phoneNumberId },
-    include: { agent: true, serviceIsland: true },
+    include: { agent: AGENT_WITH_METADATA_FIELDS, serviceIsland: true },
   });
 }
 
