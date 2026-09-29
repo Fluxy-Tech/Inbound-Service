@@ -35,10 +35,11 @@ function agentPayload(agent: {
   defaultQueueId: string | null;
   personality: string | null;
   ragEnabled: boolean;
+  handoffAfterFunctions: boolean;
   openaiTokenEncrypted: string | null;
   geminiTokenEncrypted: string | null;
   metadataFields: { name: string; nameToAgent: string; rule: string }[];
-  functions: { type: string; runAtStart: boolean; runAfterMetadata: boolean }[];
+  functions: { type: string; runAtStart: boolean; runAfterMetadata: boolean; crmStageId: string | null }[];
 }) {
   return {
     id: agent.id,
@@ -65,7 +66,10 @@ function agentPayload(agent: {
       type: f.type,
       runAtStart: f.runAtStart,
       runAfterMetadata: f.runAfterMetadata,
+      crmStageId: f.crmStageId,
     })),
+    // O que fazer ao terminar a coleta/funções: atendimento humano ou finalizar.
+    handoffAfterFunctions: agent.handoffAfterFunctions,
     // Decifrados aqui mesmo, na borda de publicação — o AI-Worker usa esses
     // valores direto (nunca mais do próprio env do processo). Token ausente
     // ou cifrado com chave divergente vira null (tryDecryptToken loga e não

@@ -55,6 +55,10 @@ model Agent {
   personality String?
   ragEnabled  Boolean @default(false)
 
+  /// Vai no payload do AI-Worker — true = encaminha pro atendimento humano
+  /// ao terminar a coleta/funções; false = finaliza a conversa.
+  handoffAfterFunctions Boolean @default(false)
+
   /// Cifrados (AES-256-GCM) — decifrados aqui na hora de montar o payload
   /// pro AI-Worker (ver src/infrastructure/crypto/token-cipher.ts e
   /// application/webhook/webhook-service.ts#agentPayload). Nunca decifrar em
@@ -88,6 +92,10 @@ model AgentFunction {
 
   runAtStart       Boolean @default(false)
   runAfterMetadata Boolean @default(false)
+
+  /// Só KANBAN_CARD: estágio do Kanban em que o card nasce (null = "Início").
+  /// Espelho só da coluna — a relação com StagesCrm fica no Agent-Api.
+  crmStageId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
