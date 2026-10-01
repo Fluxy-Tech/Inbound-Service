@@ -9,6 +9,7 @@ export function buildWebhookRouter(channel: Channel): Router {
   const router = Router();
 
   router.get("/webhook", (req, res) => {
+    console.log("[GET /webhook] query:", JSON.stringify(req.query));
     const mode = req.query["hub.mode"];
     const token = req.query["hub.verify_token"];
     const challenge = req.query["hub.challenge"];
@@ -22,6 +23,7 @@ export function buildWebhookRouter(channel: Channel): Router {
   });
 
   router.post("/webhook", async (req, res) => {
+    console.log("[POST /webhook] body:", JSON.stringify(req.body, null, 2));
     try {
       const body = req.body as MetaWebhookBody;
       const value = body?.entry?.[0]?.changes?.[0]?.value;
