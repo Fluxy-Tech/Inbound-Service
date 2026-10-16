@@ -11,7 +11,7 @@ import {
 import { extractMediaText, hasDownloadableMedia, storeInboundMedia } from "./media-service";
 import { createSignedReadUrl } from "../../infrastructure/storage/s3-client";
 import { formatOrderText, getCatalogProducts, type CatalogProduct } from "./catalog-service";
-import { describeInteractiveReply, describeLocation, saveLocationMetadata } from "./interactive-reply-service";
+import { describeInteractiveReply, describeLocation, handleFlowReply, saveLocationMetadata } from "./interactive-reply-service";
 import { handleCampaignResponse } from "./campaign-response-service";
 import { isMessageAlreadyProcessed, markMessageProcessed } from "./dedup-service";
 import { popDebounceWindow, pushToDebounceWindow } from "./debounce-service";
@@ -106,9 +106,16 @@ type AgentFeatureRow = { id: string; type: string; name: string; prompt: string;
 /// Funcionalidades do agente prontas pro payload: as que usam catálogo levam
 /// os produtos (lidos com o token deste canal, com cache por catálogo) e os
 /// cards de carrossel com arquivo no S3 ganham a URL assinada que a Meta baixa.
-async function prepareAgentFeatures(agent: { features: AgentFeatureRow[] }, accessToken: string | null) {
+/// Flows só seguem se forem do WABA deste canal e estiverem em rascunho ou
+/// publicados (o flow não existe em outra conta do WhatsApp).
+async function prepareAgentFeatures(agent: { features: AgentFeatureRow[] }, accessToken: string | null, wabaId: string) {
+  const features = agent.features.filter((f) => {
+    if (f.type !== "FLOW") return true;
+    const config = (f.config ?? {}) as { wabaId?: string; status?: string };
+    return config.wabaId === wabaId && (config.status === "DRAFT" || config.status === "PUBLISHED");
+  });
   const catalogIds = new Set(
-    agent.features
+    features
       .map((f) => (f.config as { catalogId?: string } | null)?.catalogId)
       .filter((id): id is string => Boolean(id)),
   );
@@ -117,7 +124,7 @@ async function prepareAgentFeatures(agent: { features: AgentFeatureRow[] }, acce
   );
 
   return Promise.all(
-    agent.features.map(async (feature) => {
+    features.map(async (feature) => {
       const config = (feature.config ?? {}) as { catalogId?: string; cards?: { mediaKey?: string; mediaUrl?: string }[] };
       const cards = config.cards
         ? await Promise.all(
@@ -178,6 +185,11 @@ export async function handleInboundMessage(
     target.metadata = await saveLocationMetadata(target.id, target.metadata, message.location);
   }
 
+  // Resposta de um Flow enviado pelo agente: vira texto legível e, se a
+  // funcionalidade mandar, os campos viram metadados do contato.
+  const flowReply = message.interactive?.type === "nfm_reply" ? await handleFlowReply(target, message) : null;
+  if (flowReply?.metadata) target.metadata = flowReply.metadata;
+
   const messageType = mapMetaMessageType(message.type);
   // Imagem/vídeo trazem a legenda como texto da mensagem, documento o nome do
   // arquivo; áudio e figurinha não têm texto.
@@ -191,7 +203,9 @@ export async function handleInboundMessage(
         ? await formatOrderText(message.order, whatsappChannel.metaAccessToken)
         : message.type === "location" && message.location
           ? describeLocation(message.location)
-          : message.type === "interactive" || message.type === "button"
+          : flowReply
+            ? flowReply.text
+            : message.type === "interactive" || message.type === "button"
             ? describeInteractiveReply(message)
             : extractMediaText(message);
 
@@ -301,7 +315,7 @@ export async function handleInboundMessage(
     await publishJson(channel, resolveAgentQueueName(agent.name), {
       target: targetPayload,
       channel: whatsappChannelPayload,
-      agent: agentPayload(agent, await prepareAgentFeatures(agent, whatsappChannel.metaAccessToken)),
+      agent: agentPayload(agent, await prepareAgentFeatures(agent, whatsappChannel.metaAccessToken, whatsappChannel.wabaId)),
       messagingSession: messagingSessionPayload,
       messages: [{ mongoMessageId, externalMessageId: message.id, type: messageType, text, timestamp: message.timestamp }],
     });
@@ -414,7 +428,7 @@ export async function flushDebounceWindow(channel: Channel, messagingSessionId: 
   await publishJson(channel, resolveAgentQueueName(agent.name), {
     target: { id: target.id, waId: target.waId, name: target.name, metadata: target.metadata },
     channel: whatsappChannelPayload,
-    agent: agentPayload(agent, await prepareAgentFeatures(agent, whatsappChannel.metaAccessToken)),
+    agent: agentPayload(agent, await prepareAgentFeatures(agent, whatsappChannel.metaAccessToken, whatsappChannel.wabaId)),
     messagingSession: { id: messagingSession.id, startedAt: messagingSession.startedAt },
     messages,
   });

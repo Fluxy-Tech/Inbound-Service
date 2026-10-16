@@ -427,6 +427,7 @@ enum AgentFeatureType {
   CONTEXTUAL_REPLY
   LINK_PREVIEW
   PAYMENT
+  FLOW
 }
 
 model AgentFeature {

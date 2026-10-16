@@ -107,6 +107,9 @@ export interface MetaMessage {
     type: "button_reply" | "list_reply" | string;
     button_reply?: { id: string; title: string };
     list_reply?: { id: string; title: string; description?: string };
+    /// Resposta de um WhatsApp Flow: response_json é um JSON (string) com os
+    /// campos do formulário e o flow_token enviado.
+    nfm_reply?: { name?: string; body?: string; response_json?: string };
   };
   /// Resposta rápida de template/carrossel (type="button").
   button?: { text?: string; payload?: string };
