@@ -11,6 +11,10 @@ export const AGENT_WITH_METADATA_FIELDS = {
       orderBy: { createdAt: "asc" },
     },
     functions: { select: { type: true, runAtStart: true, runAfterMetadata: true, crmStageId: true } },
+    features: {
+      select: { id: true, type: true, name: true, prompt: true, config: true },
+      orderBy: { createdAt: "asc" },
+    },
   },
 } as const;
 

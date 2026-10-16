@@ -9,6 +9,14 @@ const MAP: Partial<Record<MetaMessageType, MessageType>> = {
   document: "DOCUMENT",
   sticker: "STICKER",
   video: "VIDEO",
+  // Pedido do catálogo vira texto legível (ver catalog-service.ts#formatOrderText)
+  // e segue o fluxo de mensagem digitada.
+  order: "TEXT",
+  // Localização e cliques em botão/lista também viram texto legível
+  // (ver interactive-reply-service.ts).
+  location: "TEXT",
+  interactive: "TEXT",
+  button: "TEXT",
 };
 
 /// Tipos sem correspondência direta (location/button/contacts) viram

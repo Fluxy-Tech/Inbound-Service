@@ -44,7 +44,11 @@ export type MetaMessageType =
   | "sticker"
   | "location"
   | "button"
-  | "contacts";
+  | "contacts"
+  /// Carrinho enviado pelo contato a partir de uma mensagem de catálogo/produto.
+  | "order"
+  /// Clique em botão de resposta / item de lista enviados pelo agente.
+  | "interactive";
 
 /// Objeto de mídia dentro de messages[] — a Meta manda só o id (o arquivo em si
 /// precisa ser baixado com o token do canal, ver media-service.ts).
@@ -58,6 +62,28 @@ export interface MetaMedia {
   filename?: string;
   /// audio: true quando é mensagem de voz gravada no app
   voice?: boolean;
+}
+
+/// messages[].order — a Meta manda só o SKU (product_retailer_id); preço e
+/// quantidade podem vir como número ou string, dependendo da versão.
+export interface MetaOrder {
+  catalog_id?: string;
+  text?: string;
+  product_items?: {
+    product_retailer_id: string;
+    quantity?: number | string;
+    item_price?: number | string;
+    currency?: string;
+  }[];
+}
+
+/// messages[].location — latitude/longitude são números; name/address só
+/// vêm se o contato escolher compartilhar.
+export interface MetaLocation {
+  latitude: number;
+  longitude: number;
+  name?: string;
+  address?: string;
 }
 
 export interface MetaMessage {
@@ -75,6 +101,17 @@ export interface MetaMessage {
   video?: MetaMedia;
   document?: MetaMedia;
   sticker?: MetaMedia;
+  order?: MetaOrder;
+  location?: MetaLocation;
+  interactive?: {
+    type: "button_reply" | "list_reply" | string;
+    button_reply?: { id: string; title: string };
+    list_reply?: { id: string; title: string; description?: string };
+  };
+  /// Resposta rápida de template/carrossel (type="button").
+  button?: { text?: string; payload?: string };
+  /// Mensagem do negócio que o contato respondeu (ou que gerou o clique).
+  context?: { from?: string; id?: string };
 }
 
 export interface MetaStatus {

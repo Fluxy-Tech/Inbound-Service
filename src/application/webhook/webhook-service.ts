@@ -9,6 +9,9 @@ import {
   resolveAgentQueueName,
 } from "../../infrastructure/queue/rabbitmq/publisher";
 import { extractMediaText, hasDownloadableMedia, storeInboundMedia } from "./media-service";
+import { createSignedReadUrl } from "../../infrastructure/storage/s3-client";
+import { formatOrderText, getCatalogProducts, type CatalogProduct } from "./catalog-service";
+import { describeInteractiveReply, describeLocation, saveLocationMetadata } from "./interactive-reply-service";
 import { handleCampaignResponse } from "./campaign-response-service";
 import { isMessageAlreadyProcessed, markMessageProcessed } from "./dedup-service";
 import { popDebounceWindow, pushToDebounceWindow } from "./debounce-service";
@@ -19,6 +22,10 @@ import { saveInboundMessage } from "./mongo-message-service";
 import { isSessionProcessing, markSessionProcessing } from "./processing-state-service";
 import { AGENT_WITH_METADATA_FIELDS, resolveOrCreateTarget, resolveChannel } from "./target-service";
 import { requestTypingIndicator } from "./typing-indicator-service";
+
+/// Tipos que o Inbound-Service converte em texto e seguem o fluxo de mensagem
+/// digitada (agrupamento de 10s), em vez do caminho de mídia.
+const TEXT_LIKE_TYPES = new Set<MetaMessage["type"]>(["text", "order", "location", "interactive", "button"]);
 
 function agentPayload(agent: {
   id: string;
@@ -36,11 +43,15 @@ function agentPayload(agent: {
   personality: string | null;
   ragEnabled: boolean;
   handoffAfterFunctions: boolean;
+  rgbsEnabled: boolean;
+  timeSmall: number;
+  timeMedium: number;
+  timeLarge: number;
   openaiTokenEncrypted: string | null;
   geminiTokenEncrypted: string | null;
   metadataFields: { name: string; nameToAgent: string; rule: string }[];
   functions: { type: string; runAtStart: boolean; runAfterMetadata: boolean; crmStageId: string | null }[];
-}) {
+}, features: Awaited<ReturnType<typeof prepareAgentFeatures>> = []) {
   return {
     id: agent.id,
     name: agent.name,
@@ -70,6 +81,17 @@ function agentPayload(agent: {
     })),
     // O que fazer ao terminar a coleta/funções: atendimento humano ou finalizar.
     handoffAfterFunctions: agent.handoffAfterFunctions,
+    // RGBS: o AI-Worker quebra a resposta em [QB] e espera antes de cada parte
+    // o tempo (segundos) da faixa de tamanho dela.
+    // Funcionalidades de mensagem (aba "Função" › Adicionar funcionalidade) —
+    // o AI-Worker vira cada uma em ferramenta + instrução (ver prepareAgentFeatures).
+    features,
+    rgbs: {
+      enabled: agent.rgbsEnabled,
+      timeSmall: agent.timeSmall,
+      timeMedium: agent.timeMedium,
+      timeLarge: agent.timeLarge,
+    },
     // Decifrados aqui mesmo, na borda de publicação — o AI-Worker usa esses
     // valores direto (nunca mais do próprio env do processo). Token ausente
     // ou cifrado com chave divergente vira null (tryDecryptToken loga e não
@@ -77,6 +99,41 @@ function agentPayload(agent: {
     openaiToken: tryDecryptToken(agent.openaiTokenEncrypted, `openaiToken do agente ${agent.id}`),
     geminiToken: tryDecryptToken(agent.geminiTokenEncrypted, `geminiToken do agente ${agent.id}`),
   };
+}
+
+type AgentFeatureRow = { id: string; type: string; name: string; prompt: string; config: unknown };
+
+/// Funcionalidades do agente prontas pro payload: as que usam catálogo levam
+/// os produtos (lidos com o token deste canal, com cache por catálogo) e os
+/// cards de carrossel com arquivo no S3 ganham a URL assinada que a Meta baixa.
+async function prepareAgentFeatures(agent: { features: AgentFeatureRow[] }, accessToken: string | null) {
+  const catalogIds = new Set(
+    agent.features
+      .map((f) => (f.config as { catalogId?: string } | null)?.catalogId)
+      .filter((id): id is string => Boolean(id)),
+  );
+  const products = new Map<string, CatalogProduct[]>(
+    await Promise.all([...catalogIds].map(async (id) => [id, await getCatalogProducts(id, accessToken)] as const)),
+  );
+
+  return Promise.all(
+    agent.features.map(async (feature) => {
+      const config = (feature.config ?? {}) as { catalogId?: string; cards?: { mediaKey?: string; mediaUrl?: string }[] };
+      const cards = config.cards
+        ? await Promise.all(
+            config.cards.map(async (card) => (card.mediaKey ? { ...card, mediaUrl: await createSignedReadUrl(card.mediaKey) } : card)),
+          )
+        : undefined;
+      return {
+        id: feature.id,
+        type: feature.type,
+        name: feature.name,
+        prompt: feature.prompt,
+        config: cards ? { ...config, cards } : config,
+        ...(config.catalogId ? { products: products.get(config.catalogId) ?? [] } : {}),
+      };
+    }),
+  );
 }
 
 export async function handleInboundMessage(
@@ -116,10 +173,27 @@ export async function handleInboundMessage(
     name: contact?.profile?.name,
   });
 
+  // Localização compartilhada fica salva no metadado "localization" do contato.
+  if (message.type === "location" && message.location) {
+    target.metadata = await saveLocationMetadata(target.id, target.metadata, message.location);
+  }
+
   const messageType = mapMetaMessageType(message.type);
   // Imagem/vídeo trazem a legenda como texto da mensagem, documento o nome do
   // arquivo; áudio e figurinha não têm texto.
-  const text = message.type === "text" ? (message.text?.body ?? "") : extractMediaText(message);
+  // Pedido do catálogo, clique em botão/lista e localização viram texto
+  // legível — é assim que seguem pro agente (e pro histórico), como uma
+  // mensagem digitada.
+  const text =
+    message.type === "text"
+      ? (message.text?.body ?? "")
+      : message.type === "order" && message.order
+        ? await formatOrderText(message.order, whatsappChannel.metaAccessToken)
+        : message.type === "location" && message.location
+          ? describeLocation(message.location)
+          : message.type === "interactive" || message.type === "button"
+            ? describeInteractiveReply(message)
+            : extractMediaText(message);
 
   // Assíncrono de propósito (sem await) — vincula a resposta a uma campanha
   // pendente e avalia bloqueio por frase, sem atrasar o roteamento da
@@ -220,13 +294,14 @@ export async function handleInboundMessage(
   // "AI" e "FINISHED" seguem para o pipeline de IA — não existe ainda regra de
   // produto para reengajamento automático de uma conversa "FINISHED" (mesmo
   // gap do sistema deprecado), então tratamos igual a "AI" por ora.
-  if (message.type !== "text") {
+  // Tipos que já viraram texto acima seguem o agrupamento normal.
+  if (!TEXT_LIKE_TYPES.has(message.type)) {
     await markSessionProcessing(messagingSession.id);
     await requestTypingIndicator(channel, whatsappChannel.id, whatsappChannel.phoneNumberId, message.id);
     await publishJson(channel, resolveAgentQueueName(agent.name), {
       target: targetPayload,
       channel: whatsappChannelPayload,
-      agent: agentPayload(agent),
+      agent: agentPayload(agent, await prepareAgentFeatures(agent, whatsappChannel.metaAccessToken)),
       messagingSession: messagingSessionPayload,
       messages: [{ mongoMessageId, externalMessageId: message.id, type: messageType, text, timestamp: message.timestamp }],
     });
@@ -339,7 +414,7 @@ export async function flushDebounceWindow(channel: Channel, messagingSessionId: 
   await publishJson(channel, resolveAgentQueueName(agent.name), {
     target: { id: target.id, waId: target.waId, name: target.name, metadata: target.metadata },
     channel: whatsappChannelPayload,
-    agent: agentPayload(agent),
+    agent: agentPayload(agent, await prepareAgentFeatures(agent, whatsappChannel.metaAccessToken)),
     messagingSession: { id: messagingSession.id, startedAt: messagingSession.startedAt },
     messages,
   });

@@ -59,6 +59,24 @@ model Agent {
   /// ao terminar a coleta/funções; false = finaliza a conversa.
   handoffAfterFunctions Boolean @default(false)
 
+  /// RGBS (Receives, Generates, Breaks and Sends) — aba "Função" do Agent
+  /// Console. Ligado: o prompt pede pro agente quebrar a resposta com [QB] e
+  /// o AI-Worker envia cada parte como uma mensagem separada, esperando antes
+  /// de cada uma um tempo conforme o tamanho dela (em segundos):
+  /// até 40 caracteres = timeSmall, até 100 = timeMedium, acima = timeLarge.
+  rgbsEnabled Boolean @default(false)
+  timeSmall   Int     @default(5)
+  timeMedium  Int     @default(10)
+  timeLarge   Int     @default(15)
+
+  /// OBSOLETO — o catálogo virou AgentFeature (type CATALOG), migrado na
+  /// 20261016030000_add_agent_features. Colunas mantidas só pra não quebrar
+  /// serviços ainda não reimplantados; nada lê mais daqui.
+  catalogEnabled Boolean @default(false)
+  catalogId      String?
+  catalogName    String?
+  catalogPrompt  String?
+
   /// Cifrados (AES-256-GCM) — decifrados aqui na hora de montar o payload
   /// pro AI-Worker (ver src/infrastructure/crypto/token-cipher.ts e
   /// application/webhook/webhook-service.ts#agentPayload). Nunca decifrar em
@@ -72,6 +90,7 @@ model Agent {
   whatsappChannels Channel[]
   metadataFields   AgentMetadataField[]
   functions        AgentFunction[]
+  features         AgentFeature[]
 
   @@index([organizationId])
   @@index([defaultQueueId])
@@ -387,4 +406,40 @@ model MessageLog {
 
   @@index([messageId])
   @@index([messageLog, stagio])
+}
+
+/// Funcionalidades de mensagem do agente (aba "Função" › "Adicionar
+/// funcionalidade" no Agent Console). Cada linha é uma instância configurada
+/// — pode haver várias do mesmo tipo (ex: dois catálogos, vários botões de
+/// link), exceto LOCATION_REQUEST, CONTEXTUAL_REPLY e PAYMENT (uma por
+/// agente). `prompt` = quando o agente deve usar; `config` = campos do tipo
+/// (validados em Agent-Api/agent-feature-validation.ts). O Inbound-Service
+/// manda todas no payload e o AI-Worker vira cada uma em ferramenta + prompt.
+/// PAYMENT existe só no backend (não aparece no Console por enquanto).
+enum AgentFeatureType {
+  CATALOG
+  PRODUCT_CAROUSEL
+  CTA_URL
+  LIST
+  REPLY_BUTTONS
+  MEDIA_CAROUSEL
+  LOCATION_REQUEST
+  CONTEXTUAL_REPLY
+  LINK_PREVIEW
+  PAYMENT
+}
+
+model AgentFeature {
+  id      String           @id @default(cuid())
+  agentId String
+  agent   Agent            @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  type    AgentFeatureType
+  name    String
+  prompt  String           @default("")
+  config  Json             @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([agentId])
 }

@@ -1,4 +1,5 @@
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { env } from "../../config/env";
 
 const client = new S3Client({
@@ -32,6 +33,13 @@ export async function uploadInboundMedia(input: {
   );
 
   return `${env.SEAWEEDFS_S3_ENDPOINT}/${env.SEAWEEDFS_S3_BUCKET}/${input.key}`;
+}
+
+/// URL de leitura assinada — o bucket não é público. Usada pra mídia das
+/// funcionalidades do agente (cards do carrossel), que a Meta baixa no envio;
+/// 6h cobre o turno do agente com folga (RGBS incluso).
+export function createSignedReadUrl(key: string, expiresIn = 6 * 60 * 60): Promise<string> {
+  return getSignedUrl(client, new GetObjectCommand({ Bucket: env.SEAWEEDFS_S3_BUCKET, Key: key }), { expiresIn });
 }
 
 export function inboundMediaKey(input: { organizationId: string; targetId: string; fileName: string }): string {
