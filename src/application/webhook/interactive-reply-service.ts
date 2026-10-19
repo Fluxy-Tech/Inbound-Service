@@ -56,6 +56,23 @@ export function describeInteractiveReply(message: MetaMessage): string {
 /// "sturnus:<id da funcionalidade>:<aleatório>" (ver funcionalidades.py).
 const FLOW_TOKEN_PREFIX = "sturnus:";
 
+/// Marcador de Flow respondido em Target.metadata: "flow_respondido_<id da
+/// funcionalidade>" = data/hora da resposta. Só com "salvar como metadados"
+/// ligado — é o que o AI-Worker lê pra saber que o Flow da coleta já foi
+/// respondido, mesmo numa sessão nova (precisa bater com
+/// CHAVE_FLOW_RESPONDIDO em funcionalidades.py).
+export const FLOW_ANSWERED_METADATA_PREFIX = "flow_respondido_";
+
+function answeredAt(): string {
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    dateStyle: "short",
+    timeStyle: "short",
+  })
+    .format(new Date())
+    .replace(",", "");
+}
+
 function flowFieldValue(value: unknown): string {
   if (Array.isArray(value)) return value.map(flowFieldValue).join(", ");
   if (typeof value === "boolean") return value ? "Sim" : "Não";
@@ -64,8 +81,9 @@ function flowFieldValue(value: unknown): string {
 }
 
 /// Resposta de um WhatsApp Flow (interactive.nfm_reply). Devolve o texto que
-/// segue pro agente e, quando a funcionalidade tem "salvar como metadados"
-/// ligado, grava cada campo em Target.metadata (sem apagar o resto).
+/// segue pro agente (com o id da funcionalidade, como nos cliques de botão) e,
+/// quando a funcionalidade tem "salvar como metadados" ligado, grava cada
+/// campo e o marcador de respondido em Target.metadata (sem apagar o resto).
 export async function handleFlowReply(
   target: { id: string; organizationId: string; metadata: Prisma.JsonValue | null },
   message: MetaMessage,
@@ -94,16 +112,21 @@ export async function handleFlowReply(
 
   const title = config.flowName || feature?.name || "formulário";
   const lines = fields.map(([key, value]) => `- ${key}: ${value}`);
-  let text = `📝 Respondeu o formulário "${title}"${lines.length ? `:\n${lines.join("\n")}` : " (sem campos preenchidos)."}`;
+  const id = feature ? ` (id: ${featureId})` : "";
+  let text = `📝 Respondeu o formulário "${title}"${id}${lines.length ? `:\n${lines.join("\n")}` : " (sem campos preenchidos)."}`;
 
-  if (!config.saveAsMetadata || fields.length === 0) return { text };
+  if (!feature || !config.saveAsMetadata) return { text };
 
   const base =
     target.metadata && typeof target.metadata === "object" && !Array.isArray(target.metadata)
       ? (target.metadata as Prisma.JsonObject)
       : {};
-  const metadata: Prisma.JsonObject = { ...base, ...Object.fromEntries(fields) };
+  const metadata: Prisma.JsonObject = {
+    ...base,
+    ...Object.fromEntries(fields),
+    [`${FLOW_ANSWERED_METADATA_PREFIX}${featureId}`]: answeredAt(),
+  };
   await prisma.target.update({ where: { id: target.id }, data: { metadata } });
-  text += "\n(Respostas salvas nos metadados do contato.)";
+  if (fields.length) text += "\n(Respostas salvas nos metadados do contato.)";
   return { text, metadata };
 }
