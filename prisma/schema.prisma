@@ -69,6 +69,10 @@ model Agent {
   timeMedium  Int     @default(10)
   timeLarge   Int     @default(15)
 
+  /// Últimas mensagens da sessão que vão pro modelo — ver
+  /// Agent-Api/prisma/schema.prisma (dono canônico).
+  limitHistoryToAgent Int @default(6)
+
   /// OBSOLETO — o catálogo virou AgentFeature (type CATALOG), migrado na
   /// 20261016030000_add_agent_features. Colunas mantidas só pra não quebrar
   /// serviços ainda não reimplantados; nada lê mais daqui.

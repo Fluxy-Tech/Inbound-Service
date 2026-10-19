@@ -47,6 +47,7 @@ function agentPayload(agent: {
   timeSmall: number;
   timeMedium: number;
   timeLarge: number;
+  limitHistoryToAgent: number;
   openaiTokenEncrypted: string | null;
   geminiTokenEncrypted: string | null;
   metadataFields: { name: string; nameToAgent: string; rule: string }[];
@@ -92,6 +93,8 @@ function agentPayload(agent: {
       timeMedium: agent.timeMedium,
       timeLarge: agent.timeLarge,
     },
+    // Quantas das últimas mensagens trocadas da sessão vão pro modelo.
+    limitHistoryToAgent: agent.limitHistoryToAgent,
     // Decifrados aqui mesmo, na borda de publicação — o AI-Worker usa esses
     // valores direto (nunca mais do próprio env do processo). Token ausente
     // ou cifrado com chave divergente vira null (tryDecryptToken loga e não
