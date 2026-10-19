@@ -1,7 +1,5 @@
 import { redis } from "../../infrastructure/cache/redis/client";
 
-const WINDOW_SECONDS = 10;
-
 function markerKey(messagingSessionId: string): string {
   return `debounce:session:${messagingSessionId}`;
 }
@@ -18,16 +16,17 @@ export interface DebouncedMessage {
   timestamp: string;
 }
 
-/// Agrupamento por sessão com janela de 10s que reinicia a cada mensagem nova
-/// (regra exata do EscopoSaas). RPUSH acumula em ordem de chegada; o SET com
+/// Agrupamento por sessão com janela de windowSeconds (Channel.messageWaitSeconds,
+/// configurável por canal) que reinicia a cada mensagem nova. RPUSH acumula em ordem de chegada; o SET com
 /// GET diz se essa é a PRIMEIRA mensagem da janela (pra decidir se manda a
 /// processingMessage imediata) e sempre reseta o TTL, seja janela nova ou não.
 export async function pushToDebounceWindow(
   messagingSessionId: string,
   message: DebouncedMessage,
+  windowSeconds: number,
 ): Promise<{ isFirstInWindow: boolean }> {
   await redis.rpush(queueKey(messagingSessionId), JSON.stringify(message));
-  const previous = await redis.set(markerKey(messagingSessionId), "1", "EX", WINDOW_SECONDS, "GET");
+  const previous = await redis.set(markerKey(messagingSessionId), "1", "EX", Math.max(1, windowSeconds), "GET");
   return { isFirstInWindow: previous === null };
 }
 

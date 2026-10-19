@@ -323,13 +323,17 @@ export async function handleInboundMessage(
     return;
   }
 
-  const { isFirstInWindow } = await pushToDebounceWindow(messagingSession.id, {
-    mongoMessageId,
-    externalMessageId: message.id,
-    type: "TEXT",
-    text,
-    timestamp: message.timestamp,
-  });
+  const { isFirstInWindow } = await pushToDebounceWindow(
+    messagingSession.id,
+    {
+      mongoMessageId,
+      externalMessageId: message.id,
+      type: "TEXT",
+      text,
+      timestamp: message.timestamp,
+    },
+    whatsappChannel.messageWaitSeconds,
+  );
 
   // processingMessage só faz sentido como aviso de "cheguei em cima de algo
   // que já está rodando" — só dispara se (a) esta mensagem abre uma janela de
@@ -351,7 +355,7 @@ export async function handleInboundMessage(
   }
 }
 
-/// Chamado pelo debounce worker quando a janela de 10s de uma sessão fecha —
+/// Chamado pelo debounce worker quando a janela de agrupamento de uma sessão fecha —
 /// re-resolve o contexto (sessão → target → canal → agente) porque o flush
 /// acontece de forma assíncrona e desacoplada da requisição HTTP original.
 export async function flushDebounceWindow(channel: Channel, messagingSessionId: string): Promise<void> {

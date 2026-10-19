@@ -174,6 +174,10 @@ model Channel {
   /// Liga/desliga a avaliação de wordsToBlockCampaign para este canal.
   useWordsToBlockCampaign Boolean  @default(false)
 
+  /// Tempo (segundos) da janela de agrupamento de mensagens deste canal — ver
+  /// Agent-Api/prisma/schema.prisma (dono canônico) e debounce-service.ts.
+  messageWaitSeconds Int @default(10)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
